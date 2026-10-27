@@ -2,7 +2,7 @@
 # Build a mod of the suite as it is pushed, and release it on GitHub as v<mod_version>.
 #
 #   mod-release MOD            from the directory holding the MOD checkout
-#   mod-release --dry-run MOD  build it, and say what would be released
+#   mod-release --dry-run MOD  build it, released or not, and say what would be released
 #
 # A mod builds against sibling checkouts beside it (../pandorical, and the built jars of the ones
 # whose API it compiles against), so those are cloned next to it first, and built in the order
@@ -20,7 +20,7 @@ prop() { sed -nE "s/^$2 *= *//p" "$1/gradle.properties" | tr -d '[:space:]'; }
 version=$(prop "$mod" mod_version)
 tag="v$version"
 
-if gh release view "$tag" -R "$OWNER/$mod" > /dev/null 2>&1; then
+if ((!dry)) && gh release view "$tag" -R "$OWNER/$mod" > /dev/null 2>&1; then
 	echo "$mod: $tag is released"
 	exit 0
 fi

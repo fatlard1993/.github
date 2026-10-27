@@ -3,6 +3,11 @@ name: mod release
 # Called by each mod's release workflow, nightly and ahead of ender-index's crawl at 04:17 UTC.
 on:
   workflow_call:
+    inputs:
+      dry-run:
+        description: Build whether or not the version is released, and release nothing
+        type: boolean
+        default: false
 
 jobs:
   release:
@@ -22,7 +27,7 @@ jobs:
           MOD: ${{ github.event.repository.name }}
         run: |
           tag="v$(sed -nE 's/^mod_version *= *//p' "$MOD/gradle.properties" | tr -d '[:space:]')"
-          if gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          if [ "${{ inputs.dry-run }}" != true ] && gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "$tag is released"
           else
             echo "build=1" >> "$GITHUB_OUTPUT"
@@ -37,4 +42,4 @@ jobs:
       - if: steps.due.outputs.build
         env:
           GH_TOKEN: ${{ github.token }}
-        run: .suite/scripts/mod-release "${{ github.event.repository.name }}"
+        run: .suite/scripts/mod-release ${{ inputs.dry-run && '--dry-run' || '' }} "${{ github.event.repository.name }}"
