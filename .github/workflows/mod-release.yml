@@ -1,0 +1,40 @@
+name: mod release
+
+# Called by each mod's release workflow, nightly and ahead of ender-index's crawl at 04:17 UTC.
+on:
+  workflow_call:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ${{ github.event.repository.name }}
+      - uses: actions/checkout@v4
+        with:
+          repository: fatlard1993/.github
+          path: .suite
+      - id: due
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOD: ${{ github.event.repository.name }}
+        run: |
+          tag="v$(sed -nE 's/^mod_version *= *//p' "$MOD/gradle.properties" | tr -d '[:space:]')"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$tag is released"
+          else
+            echo "build=1" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.due.outputs.build
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - if: steps.due.outputs.build
+        uses: gradle/actions/setup-gradle@v4
+      - if: steps.due.outputs.build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .suite/scripts/mod-release "${{ github.event.repository.name }}"

@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Build a mod of the suite as it is pushed, and release it on GitHub as v<mod_version>.
+#
+#   mod-release MOD            from the directory holding the MOD checkout
+#   mod-release --dry-run MOD  build it, and say what would be released
+#
+# A mod builds against sibling checkouts beside it (../pandorical, and the built jars of the ones
+# whose API it compiles against), so those are cloned next to it first, and built in the order
+# their jars are needed. ender-index reads release jars and nothing else; the release carries the
+# one jar named by the version, never a sources or testsupport jar.
+set -euo pipefail
+
+OWNER=fatlard1993
+dry=0
+[[ "${1:-}" == "--dry-run" ]] && { dry=1; shift; }
+mod="${1:?which mod}"
+
+prop() { sed -nE "s/^$2 *= *//p" "$1/gradle.properties" | tr -d '[:space:]'; }
+
+version=$(prop "$mod" mod_version)
+tag="v$version"
+
+if gh release view "$tag" -R "$OWNER/$mod" > /dev/null 2>&1; then
+	echo "$mod: $tag is released"
+	exit 0
+fi
+
+siblings_of() { grep -ohE '\.\./[a-z0-9-]+' "$1"/*.gradle 2>/dev/null | sed 's|^\.\./||' | sort -u; }
+providers_of() { grep -ohE '\.\./[a-z0-9-]+/gradle\.properties' "$1/build.gradle" 2>/dev/null | sed -E 's|^\.\./([a-z0-9-]+)/.*|\1|' | sort -u; }
+
+declare -A have=(["$mod"]=1)
+queue=("$mod")
+while ((${#queue[@]} > 0)); do
+	repo="${queue[0]}"
+	queue=("${queue[@]:1}")
+	for sibling in $(siblings_of "$repo"); do
+		[[ -n "${have[$sibling]:-}" ]] && continue
+		have["$sibling"]=1
+		[[ -d "$sibling" ]] || git clone -q --depth 1 "https://github.com/$OWNER/$sibling.git" "$sibling"
+		queue+=("$sibling")
+	done
+done
+
+declare -A built=()
+build() {
+	local repo="$1"
+	[[ -n "${built[$repo]:-}" ]] && return 0
+	built["$repo"]=1
+	for provider in $(providers_of "$repo"); do build "$provider"; done
+	echo "building $repo"
+	(cd "$repo" && rm -f build/libs/*.jar && ./gradlew build -q)
+}
+build "$mod"
+
+jar=$(find "$mod/build/libs" -maxdepth 1 -name "*-$version.jar" ! -name '*-sources.jar' ! -name '*-testsupport.jar' | head -1)
+[[ -n "$jar" ]] || { echo "$mod: the build made no jar for $version" >&2; exit 1; }
+
+for resources in "$mod"/src/main/resources "$mod"/src/client/resources; do
+	[[ -f "$resources/fabric.mod.json" ]] && break
+done
+name=$(jq -r '.name // empty' "$resources/fabric.mod.json" 2>/dev/null || true)
+head=$(git -C "$mod" rev-parse HEAD)
+notes=$(jq -r --arg v "$version" '.versions[$v] // [] | map("- " + .) | join("\n")' "$resources/pandorical.changelog.json" 2>/dev/null || true)
+[[ -n "$notes" ]] || notes="Built from ${head:0:12}."
+
+if ((dry)); then
+	echo "$mod: would release $tag with $(basename "$jar")"
+	echo "$notes"
+	exit 0
+fi
+
+gh release create "$tag" "$jar" -R "$OWNER/$mod" --target "$head" --title "${name:-$mod} $version" --notes "$notes"
