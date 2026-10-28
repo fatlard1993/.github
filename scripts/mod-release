@@ -91,12 +91,17 @@ while ((${#queue[@]} > 0)); do
 	done
 done
 
+# A sibling a build takes in as a subproject of its own, by settings.gradle: its providers are this
+# build's too, since it is compiled here.
+included_of() { grep -ohE "'\.\./[a-z0-9-]+'" "$1/settings.gradle" 2>/dev/null | tr -d "'" | sed 's|^\.\./||' | sort -u; }
+needs_of() { { providers_of "$1"; for included in $(included_of "$1"); do providers_of "$included"; done; } | sort -u; }
+
 declare -A built=()
 build() {
 	local repo="$1"
 	[[ -n "${built[$repo]:-}" ]] && return 0
 	built["$repo"]=1
-	for provider in $(providers_of "$repo"); do build "$provider"; done
+	for provider in $(needs_of "$repo"); do build "$provider"; done
 	echo "building $repo"
 	(cd "$repo" && rm -f build/libs/*.jar && ./gradlew build -q)
 }
