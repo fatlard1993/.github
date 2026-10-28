@@ -14,23 +14,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Whole history and tags: a released version is compared with what is pushed since its tag
       - uses: actions/checkout@v4
         with:
           path: ${{ github.event.repository.name }}
+          fetch-depth: 0
       - uses: actions/checkout@v4
         with:
           repository: fatlard1993/.github
           path: .suite
+      # Due when the version is unreleased, or released with shipped files changed since its tag
       - id: due
         env:
           GH_TOKEN: ${{ github.token }}
           MOD: ${{ github.event.repository.name }}
         run: |
           tag="v$(sed -nE 's/^mod_version *= *//p' "$MOD/gradle.properties" | tr -d '[:space:]')"
-          if [ "${{ inputs.dry-run }}" != true ] && gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "$tag is released"
-          else
+          if [ "${{ inputs.dry-run }}" = true ] || ! gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "build=1" >> "$GITHUB_OUTPUT"
+          elif ! git -C "$MOD" diff --quiet "$tag" HEAD -- . ':(exclude).github' ':(exclude)*.md' ':(exclude)LICENSE'; then
+            echo "$tag is released, and shipped files changed since: bumping"
+            echo "build=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "$tag is released, and nothing shipped has changed since"
           fi
       - if: steps.due.outputs.build
         uses: actions/setup-java@v4

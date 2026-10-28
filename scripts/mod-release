@@ -4,6 +4,11 @@
 #   mod-release MOD            from the directory holding the MOD checkout
 #   mod-release --dry-run MOD  build it, released or not, and say what would be released
 #
+# A mod whose version is released but whose shipped files changed since is bumped first: the patch
+# number goes up, the subjects of the commits since become its changelog entry, and the bump is
+# committed and pushed before the build, so the release is of a commit that says its version. A
+# minor or major bump stays a person's decision; one pushed by hand is released as it is.
+#
 # A mod builds against sibling checkouts beside it (../pandorical, and the built jars of the ones
 # whose API it compiles against), so those are cloned next to it first, and built in the order
 # their jars are needed. ender-index reads release jars and nothing else; the release carries the
@@ -11,6 +16,9 @@
 set -euo pipefail
 
 OWNER=fatlard1993
+
+# What a release carries: everything but the repository's own workflows and its prose.
+SHIPPED=(. ':(exclude).github' ':(exclude)*.md' ':(exclude)LICENSE')
 dry=0
 [[ "${1:-}" == "--dry-run" ]] && { dry=1; shift; }
 mod="${1:?which mod}"
@@ -20,9 +28,49 @@ prop() { sed -nE "s/^$2 *= *//p" "$1/gradle.properties" | tr -d '[:space:]'; }
 version=$(prop "$mod" mod_version)
 tag="v$version"
 
-if ((!dry)) && gh release view "$tag" -R "$OWNER/$mod" > /dev/null 2>&1; then
-	echo "$mod: $tag is released"
-	exit 0
+changelog_of() {
+	local resources
+	for resources in "$1"/src/main/resources "$1"/src/client/resources; do
+		[[ -f "$resources/pandorical.changelog.json" ]] && { echo "$resources/pandorical.changelog.json"; return; }
+	done
+}
+
+if gh release view "$tag" -R "$OWNER/$mod" > /dev/null 2>&1; then
+	git -C "$mod" fetch -q --tags origin 2>/dev/null || true
+
+	if ! git -C "$mod" rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+		echo "$mod: $tag is released, but its tag is not here to compare against" >&2
+		exit 1
+	fi
+
+	if git -C "$mod" diff --quiet "$tag" HEAD -- "${SHIPPED[@]}"; then
+		echo "$mod: $tag is released, and nothing shipped has changed since"
+		((dry)) || exit 0
+	else
+		bumped="${version%.*}.$((${version##*.} + 1))"
+		mapfile -t subjects < <(git -C "$mod" log --reverse --format=%s "$tag"..HEAD -- "${SHIPPED[@]}")
+		mapfile -t lines < <(printf '%s\n' "${subjects[@]}" | sed -E 's/^(.)/\U\1/; s/([^.!?])$/\1./')
+
+		echo "$mod: $tag is released, and ${#subjects[@]} change(s) since, so it becomes v$bumped"
+
+		sed -i -E "s/^(mod_version *= *).*/\1$bumped/" "$mod/gradle.properties"
+
+		changelog=$(changelog_of "$mod")
+		if [[ -n "$changelog" ]]; then
+			indent=(); grep -q $'^\t' "$changelog" && indent=(--tab)
+			jq "${indent[@]}" --arg v "$bumped" '.versions = ({($v): $ARGS.positional} + .versions)' \
+				--args "${lines[@]}" < "$changelog" > "$changelog.next" && mv "$changelog.next" "$changelog"
+		fi
+
+		version=$bumped
+		tag="v$version"
+
+		if ((!dry)); then
+			git -C "$mod" -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+				commit -qam "$version: ${subjects[0],}"
+			git -C "$mod" push -q origin HEAD
+		fi
+	fi
 fi
 
 siblings_of() { grep -ohE '\.\./[a-z0-9-]+' "$1"/*.gradle 2>/dev/null | sed 's|^\.\./||' | sort -u; }
