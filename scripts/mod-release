@@ -74,9 +74,10 @@ if gh release view "$tag" -R "$OWNER/$mod" > /dev/null 2>&1; then
 fi
 
 siblings_of() { grep -ohE '\.\./[a-z0-9-]+' "$1"/*.gradle 2>/dev/null | sed 's|^\.\./||' | sort -u; }
-# A provider is a sibling whose jar this one's build needs: named by its gradle.properties, or by
-# the dependent.gradle a mod applies to compile against it.
-providers_of() { grep -ohE '\.\./[a-z0-9-]+/(gradle\.properties|gradle/dependent\.gradle)' "$1/build.gradle" 2>/dev/null | sed -E 's|^\.\./([a-z0-9-]+)/.*|\1|' | sort -u; }
+# A provider is a sibling whose jar this one's build needs: named by its gradle.properties, by
+# the dependent.gradle a mod applies to compile against it, or by the gametest.gradle or
+# testsupport.gradle that puts Pandorical's testsupport jar on its gametest classpath.
+providers_of() { grep -ohE '\.\./[a-z0-9-]+/(gradle\.properties|gradle/dependent\.gradle|gametest\.gradle|testsupport\.gradle)' "$1/build.gradle" 2>/dev/null | sed -E 's|^\.\./([a-z0-9-]+)/.*|\1|' | sort -u; }
 
 declare -A have=(["$mod"]=1)
 queue=("$mod")
