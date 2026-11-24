@@ -17,9 +17,11 @@ set -euo pipefail
 
 OWNER=fatlard1993
 
-# What a release carries: everything but the repository's own workflows and its top-level prose; a .md
-# under src ships in the jar.
-SHIPPED=(. ':(exclude).github' ':(exclude,glob)*.md' ':(exclude)LICENSE')
+# What a release carries: everything but the repository's own workflows, licence and prose, plus the
+# prose it packs into the jar from src/*/resources. A git pathspec cannot exclude every .md and keep
+# some, so the two are asked apart.
+SHIPPED=(. ':(exclude).github' ':(exclude)*.md' ':(exclude)LICENSE')
+SHIPPED_PROSE=(':(glob)src/*/resources/**/*.md')
 dry=0
 [[ "${1:-}" == "--dry-run" ]] && { dry=1; shift; }
 mod="${1:?which mod}"
@@ -44,12 +46,14 @@ if gh release view "$tag" -R "$OWNER/$mod" > /dev/null 2>&1; then
 		exit 1
 	fi
 
-	if git -C "$mod" diff --quiet "$tag" HEAD -- "${SHIPPED[@]}"; then
+	if git -C "$mod" diff --quiet "$tag" HEAD -- "${SHIPPED[@]}" && git -C "$mod" diff --quiet "$tag" HEAD -- "${SHIPPED_PROSE[@]}"; then
 		echo "$mod: $tag is released, and nothing shipped has changed since"
 		((dry)) || exit 0
 	else
 		bumped="${version%.*}.$((${version##*.} + 1))"
-		mapfile -t subjects < <(git -C "$mod" log --reverse --format=%s "$tag"..HEAD -- "${SHIPPED[@]}")
+		mapfile -t shipping < <({ git -C "$mod" rev-list "$tag"..HEAD -- "${SHIPPED[@]}"; git -C "$mod" rev-list "$tag"..HEAD -- "${SHIPPED_PROSE[@]}"; } | sort -u)
+		mapfile -t subjects < <(git -C "$mod" log --reverse --format='%H %s' "$tag"..HEAD |
+			awk 'NR == FNR { keep[$1]; next } $1 in keep { sub(/^[^ ]+ /, ""); print }' <(printf '%s\n' "${shipping[@]}") -)
 		mapfile -t lines < <(printf '%s\n' "${subjects[@]}" | sed -E 's/^(.)/\U\1/; s/([^.!?])$/\1./')
 
 		echo "$mod: $tag is released, and ${#subjects[@]} change(s) since, so it becomes v$bumped"
