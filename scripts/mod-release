@@ -17,8 +17,9 @@ set -euo pipefail
 
 OWNER=fatlard1993
 
-# What a release carries: everything but the repository's own workflows and its prose.
-SHIPPED=(. ':(exclude).github' ':(exclude)*.md' ':(exclude)LICENSE')
+# What a release carries: everything but the repository's own workflows and its top-level prose; a .md
+# under src ships in the jar.
+SHIPPED=(. ':(exclude).github' ':(exclude,glob)*.md' ':(exclude)LICENSE')
 dry=0
 [[ "${1:-}" == "--dry-run" ]] && { dry=1; shift; }
 mod="${1:?which mod}"
